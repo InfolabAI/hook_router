@@ -1,8 +1,8 @@
 # Hook Router
 
-**Keep your Codex conversation. Delegate selected work to the right models.**
+**One plugin in Codex. Multiple requests split into ordered work for different models.**
 
-Hook Router is a **Codex plugin** for requests that mix routine work with harder analysis. Select **Route** from the `@` menu, write your request, and submit. A routing model splits the request into ordered steps; Python validates the plan and runs each step through a Codex worker with the assigned model and reasoning effort. The results return to your parent conversation.
+Hook Router adds task routing to your existing **Codex conversation through one plugin**. Select **Route** from the `@` menu, write several requests together, and submit. A routing model separates them into ordered tasks and assigns model and reasoning levels according to your difficulty guidelines. Python validates the plan and runs each task group through a Codex worker. The results return to your parent conversation.
 
 ```text
 Ordinary request → your parent Codex model
@@ -16,6 +16,8 @@ The plugin contains two lifecycle hooks, with **no added skill or MCP server**. 
 [Install](#quick-start) · [Routing rules](#configuration) · [Cost example](#cost-example-and-its-limits) · [LiteLLM comparison](#how-this-compares-with-litellm) · [Architecture](#architecture) · [Verification](#tests-and-verification)
 
 ## Why use it?
+
+The two main benefits are **adopting routing inside your existing Codex workflow by installing one plugin**, and **automatically splitting a combined request into tasks with appropriate model levels**. Setup includes your profile configuration and Codex hook trust; no separate agent application or gateway server is required.
 
 - **Choose what to delegate.** Ordinary prompts stay with the parent model. Only requests beginning with the routing prefix or plugin mention launch the routing workflow.
 - **Assign models by task.** Put your own selection criteria in `profiles[].description`: routine summaries can use one profile, new evidence review another.
@@ -39,11 +41,35 @@ An [anonymized cost study](cost_comparison.md) applies published model prices to
 
 **The 89.1% figure is an illustrative static price reduction, not a measured improvement in quality, speed, or subscription allowance.** Token counts and cache hits are held constant across models. The baseline excludes routing and separate relay overhead; routed rows include both. The study uses rates checked on 2026-10-04 rather than promising current prices.
 
-The default worker profiles remain Sol low / Sol medium / Astra high; this example does not change your configuration or parent model. Validate smaller models on your own tasks before adopting an alternative.
+The default worker profiles remain Sol low / Sol medium / Astra high; this example does not change your configuration or parent model. Validate smaller models on your own tasks before adopting an alternative. For a configuration that keeps those worker profiles, see [using Luna for the parent conversation](#why-results-return-through-the-parent-and-where-luna-fits).
 
 One user request in the study produced **19 model responses**, including 13 worker tool calls. The Astra parent's report delivery alone accounted for about $1.626 of the observed $2.401 equivalent. A large parent context can therefore offset worker savings. Resume preserves history but does not make context processing free.
 
 See [the full calculations, assumptions, and subscription caveats](cost_comparison.md). Plugin registration and Python coordination add no model calls by themselves; the planner, workers, and parent relay do.
+
+## Why results return through the parent, and where Luna fits
+
+### Deliver reports in the normal conversation format
+
+The hook hands the completed Markdown report to the parent model so that it appears as a normal assistant answer in the Codex conversation, with headings, lists, tables, and links. **Presentation in the conversation is the reason for this extra delivery step.** The worker prepares the report; the parent is instructed to preserve its text and Python-generated model headers without rewriting the analysis or repeating the work.
+
+Technically, the hook returns `hookSpecificOutput.additionalContext` and lets the parent turn continue. Long reports are supplied through a private file path. This avoids using a blocking hook message as the final report. Parent delivery still consumes input and output tokens, and exact reproduction remains a model instruction rather than a code-enforced renderer.
+
+### Use Luna for delivery and stronger workers for the work
+
+If your Codex account offers Luna, selecting it for the parent conversation can make this workflow economical: Luna receives and delivers the finished reports, while the plugin independently selects Sol or Astra workers for the requested tasks. Changing the parent model does not change the router or worker profiles.
+
+```text
+Codex conversation: Luna
+  → @route: summarize, verify new evidence, then draft a reply
+  → Sol low router
+  → Sol low → Sol medium → Sol low workers
+  → Luna delivers the completed report in the conversation
+```
+
+In the static cost example, changing only the parent from Astra to Luna while keeping the original Sol router and workers reduces the API-equivalent estimate from **$2.401 to $0.791 (67.0%)**. This is a same-token price calculation, not a rerun showing equal delivery quality or a measured subscription-limit saving.
+
+This configuration fits sessions mainly used to submit routed work and receive reports. **Ordinary requests without `@route` are still handled by Luna**, so choose a stronger parent when you need substantial direct analysis there. The parent's full conversation is not automatically copied to workers: include the necessary context in each routed request or accessible files. Verify that the selected parent preserves the report and its model headers correctly.
 
 ## How this compares with LiteLLM
 
