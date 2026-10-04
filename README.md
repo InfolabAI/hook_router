@@ -1,12 +1,109 @@
 # Hook Router
 
-**One request. Different models. Ordered execution. One parent conversation.**
+**Keep your Codex conversation. Delegate selected work to the right models.**
 
-Hook Router is a small, configurable **Codex plugin with lifecycle hooks** that assigns parts of a request to different model/reasoning profiles. A routing model produces a JSON plan; Python validates and executes it sequentially; the parent assistant receives the report and delivers it to you. Its plugin name is `route`; no skill or MCP server is required.
+Hook Router is a **Codex plugin** for requests that mix routine work with harder analysis. Select **Route** from the `@` menu, write your request, and submit. A routing model splits the request into ordered steps; Python validates the plan and runs each step through a Codex worker with the assigned model and reasoning effort. The results return to your parent conversation.
 
-It is a standalone implementation with **no project-specific services, databases, personal paths, credentials, or workflow records**. Python standard library only. MIT licensed.
+```text
+Ordinary request → your parent Codex model
 
-> **Platform:** Linux or WSL2, Python 3.9+, and an authenticated Codex CLI with `UserPromptSubmit`, `Interrupt`, `--output-schema`, and `exec resume` support. CLI integration developed against **Codex 0.160.0**. Native Windows/macOS are not supported by this version's `/proc` process supervision.
+@route request   → routing plan → Codex workers, in order → parent reports results
+                                  low → medium → low
+```
+
+The plugin contains two lifecycle hooks, with **no added skill or MCP server**. It uses Python's standard library and your existing Codex authentication. Configuration and runtime records stay outside the repository. MIT licensed.
+
+[Install](#quick-start) · [Routing rules](#configuration) · [Cost example](#cost-example-and-its-limits) · [LiteLLM comparison](#how-this-compares-with-litellm) · [Architecture](#architecture) · [Verification](#tests-and-verification)
+
+## Why use it?
+
+- **Choose what to delegate.** Ordinary prompts stay with the parent model. Only requests beginning with the routing prefix or plugin mention launch the routing workflow.
+- **Assign models by task.** Put your own selection criteria in `profiles[].description`: routine summaries can use one profile, new evidence review another.
+- **Run Codex agents.** Workers can read files, call tools, and iterate through `codex exec`. Later steps resume one persistent worker thread for the parent session.
+- **Preserve dependencies.** A review runs before the reply based on it, even when the earlier summary and later reply use the same model.
+- **Resume interrupted work.** Checkpoints track completed steps; interruption stops the matching local worker processes. Recovery inspects effects before continuing.
+- **Avoid a separate gateway deployment.** The package runs locally alongside Codex. It does not require a new model API service.
+
+This is useful for bounded workflows combining extraction, technical review, and follow-up actions. A short one-step question may be faster and cheaper to handle directly. Routing can misclassify a task, and the parent model still consumes usage when delivering the report.
+
+## Cost example and its limits
+
+An [anonymized cost study](cost_comparison.md) applies published model prices to observed token counts from one three-step workflow. It includes repeated context, tool interactions, reasoning output, routing, and parent delivery. Alternative configurations were **repriced, not rerun**.
+
+| Configuration in that example | API-equivalent cost | Reduction vs. Astra-only work baseline |
+|---|---:|---:|
+| Three substantive stages repriced as Astra; no router or separate relay | $4.392 | Baseline |
+| Observed tokens: Astra parent, Sol router and workers | $2.401 | 45.3% |
+| Hypothetical Luna parent; original Sol router and workers | $0.791 | 82.0% |
+| Hypothetical Luna parent and routine workers; Sol router and analytical worker | $0.480 | 89.1% |
+
+**The 89.1% figure is an illustrative static price reduction, not a measured improvement in quality, speed, or subscription allowance.** Token counts and cache hits are held constant across models. The baseline excludes routing and separate relay overhead; routed rows include both. The study uses rates checked on 2026-10-04 rather than promising current prices.
+
+The default worker profiles remain Sol low / Sol medium / Astra high; this example does not change your configuration or parent model. Validate smaller models on your own tasks before adopting an alternative.
+
+One user request in the study produced **19 model responses**, including 13 worker tool calls. The Astra parent's report delivery alone accounted for about $1.626 of the observed $2.401 equivalent. A large parent context can therefore offset worker savings. Resume preserves history but does not make context processing free.
+
+See [the full calculations, assumptions, and subscription caveats](cost_comparison.md). Plugin registration and Python coordination add no model calls by themselves; the planner, workers, and parent relay do.
+
+## How this compares with LiteLLM
+
+**Codex can use LiteLLM as a model provider and retain its agent loop and session.** Hook Router's distinction is selective delegation and explicit workflow coordination. [LiteLLM's Codex integration](https://docs.litellm.ai/docs/proxy/client_setup/codex_cli)
+
+| Question | Hook Router | Codex connected to LiteLLM |
+|---|---|---|
+| When does routing apply? | To requests you explicitly delegate with `@route` | To model requests sent through the configured provider; automatic selection is optional |
+| What is assigned? | An ordered task group, executed by a Codex worker | A model request arriving at the gateway; session pinning is also available |
+| Who sets the criteria? | You configure profiles and descriptions; the planner interprets them | You configure model groups, routing strategies, or Auto Router classifiers and tiers |
+| Who manages work? | The coordinator tracks a separate worker thread, step order, checkpoints, and parent relay | Codex manages the agent loop; provider setup alone does not create this parent/worker workflow |
+| What is the operational focus? | Local, selective delegation within a Codex workflow | Provider integration, request routing, load balancing, and failure handling |
+
+LiteLLM supports both operational strategies such as cost/load/latency and content-based Auto Router classification. Custom criteria are possible in both systems. Choosing a gateway does not require automatic downgrading of every request. [Routing strategies](https://docs.litellm.ai/docs/routing), [Auto Router](https://docs.litellm.ai/docs/auto_router)
+
+The systems can be combined in principle, but this implementation does not inherit arbitrary custom-provider configuration into workers. Such integration requires explicit provider/authentication support and verification. Read the [detailed comparison and tradeoffs (Korean)](docs/261004_litellm-comparison.md).
+
+> **Platform:** Linux or WSL2, Python 3.9+, and authenticated Codex CLI with `UserPromptSubmit`, `Interrupt`, `--output-schema`, and `exec resume` support. Tested with **Codex 0.160.0**. Native Windows/macOS are not supported by the current `/proc` process supervisor.
+
+## Quick start
+
+```bash
+git clone https://github.com/InfolabAI/hook_router.git
+cd hook_router
+codex login
+python3 router.py --init-config  # first installation only; keep an existing config
+```
+
+Edit `~/.config/codex-hook-router/config.json` to select **model IDs available to your account**. The included example uses Sol low / Sol medium / Astra high; these are examples, not an availability guarantee. You can use one model with different reasoning efforts, or replace all profiles.
+
+```bash
+python3 router.py --check
+codex plugin marketplace add "$PWD"
+codex plugin add route@hook-router
+```
+
+If you previously used this checkout's `python3 router.py --install`, run `python3 router.py --uninstall` after installing the plugin to remove the duplicate personal hooks. It preserves your configuration and session history.
+
+Restart Codex, open **`/hooks` and review/trust the plugin's `UserPromptSubmit` and `Interrupt` definitions**. This is a Codex requirement; installation does not bypass hook trust. Type `@route`, select **Route** (Plugin), and append your request. The picker inserts `@Route`; serialized `plugin://route@...` mentions are also recognized. Selection alone does not run anything; submitting the request starts the hook before the parent model.
+
+The repository root is the plugin package: `.codex-plugin/plugin.json` supplies its identity and menu description, `hooks/hooks.json` registers both lifecycle events using `${PLUGIN_ROOT}`, and `.agents/plugins/marketplace.json` makes this checkout installable. Installed code is cached by Codex; reinstall after updating the source. The personal config and state remain outside the plugin. The bundled hook timeout is 960 seconds (Interrupt: 3); keep `total_timeout` below that or update the hook definition and review trust again.
+
+For a standalone installation without a plugin menu entry, use `python3 router.py --install` instead of the plugin commands. Use only one registration method at a time.
+
+Then, in any Codex workspace:
+
+```text
+@route Summarize the supplied notes, extract the action items, review the proposed experiment, then draft a short reply. Do not send it.
+```
+
+The parent receives an instruction to forward the report verbatim, with headers such as:
+
+```text
+[Model: gpt-6.1-sol | Reasoning: low]
+
+Step 1/3: completed
+...
+```
+
+The parent relay is an instruction to the parent model, not a deterministic output renderer. Execution order, validation, and checkpointing are enforced by Python.
 
 ## Architecture
 
@@ -44,48 +141,6 @@ For `A → B → C → D → E`, suppose A/B/C/E use the routine profile and D n
 
 **E stays after D.** The router cannot group all low-effort tasks together if that changes the order. Concatenating the command fragments must reproduce the original request *exactly*, including whitespace and separators. Semantic routing is still an AI judgment: exact coverage does not prove the chosen model or task interpretation is correct.
 
-## Quick start
-
-```bash
-git clone https://github.com/InfolabAI/hook_router.git
-cd hook_router
-codex login
-python3 router.py --init-config
-```
-
-Edit `~/.config/codex-hook-router/config.json` to select **model IDs available to your account**. The included example uses Sol low / Sol medium / Astra high; these are examples, not an availability guarantee. You can use one model with different reasoning efforts, or replace all profiles.
-
-```bash
-python3 router.py --check
-codex plugin marketplace add "$PWD"
-codex plugin add route@hook-router
-```
-
-If you previously used this checkout's `python3 router.py --install`, run `python3 router.py --uninstall` after installing the plugin to remove the duplicate personal hooks. It preserves your configuration and session history.
-
-Restart Codex, open **`/hooks` and review/trust the plugin's `UserPromptSubmit` and `Interrupt` definitions**. This is a Codex requirement; installation does not bypass hook trust. Type `@route`, select **Route** (Plugin), and append your request. The picker inserts `@Route`; serialized `plugin://route@...` mentions are also recognized. Selection alone does not run anything; submitting the request starts the hook before the parent model.
-
-The repository root is the plugin package: `.codex-plugin/plugin.json` supplies its identity and menu description, `hooks/hooks.json` registers both lifecycle events using `${PLUGIN_ROOT}`, and `.agents/plugins/marketplace.json` makes this checkout installable. Installed code is cached by Codex; reinstall after updating the source. The personal config and state remain outside the plugin. The bundled hook timeout is 960 seconds (Interrupt: 3); keep `total_timeout` below that or update the hook definition and review trust again.
-
-For a standalone installation without a plugin menu entry, use `python3 router.py --install` instead of the plugin commands. Use only one registration method at a time.
-
-Then, in any Codex workspace:
-
-```text
-@route Summarize the supplied notes, extract the action items, review the proposed experiment, then draft a short reply. Do not send it.
-```
-
-The parent receives an instruction to forward the report verbatim, with headers such as:
-
-```text
-[Model: gpt-6.1-sol | Reasoning: low]
-
-Step 1/3: completed
-...
-```
-
-The parent relay is an instruction to the parent model, not a deterministic output renderer. Execution order, validation, and checkpointing are enforced by Python.
-
 ## Configuration
 
 Start with [`examples/config.json`](examples/config.json). No package installation or API SDK is required.
@@ -119,6 +174,25 @@ Merge those keys into your config; keep your profiles and other settings. Worker
 The worker uses `--ignore-user-config`, disables hooks/apps/nested agents, and reuses your **Codex login files**. It does not inherit arbitrary MCP/app configuration. Secret-looking environment variables (including API keys) are removed. Environment-only API authentication is therefore not supported; use `codex login` or supported file-backed Codex authentication.
 
 A new parent Codex session gets a new worker thread. Later routed requests in the same parent session resume that worker thread. The parent's entire conversation is **not** automatically copied: give important context in the routed request or accessible workspace files. Workers retain their own conversation and receive the previous step results explicitly.
+
+### Your model-selection guide
+
+`profiles[].description` is sent to the **router** on every routed request. `instructions` is sent to **workers** and does not serve as the router's model-selection guide.
+
+For example, customize the routine profile in your existing `profiles` list:
+
+```json
+{
+  "name": "routine",
+  "model": "gpt-6.1-sol",
+  "effort": "low",
+  "description": "Summarize inboxes, extract confirmed task fields, and draft replies from an already completed review. New technical validation belongs to the analysis profile."
+}
+```
+
+Describe new evidence review in the analysis profile and difficult design or conflicting evidence in the complex profile. A request can also explicitly ask for a supported model and effort. Python enforces allowed pairs and source order; it does **not** independently prove that the planner honored every natural-language model preference or classified difficulty correctly.
+
+The parent's model is separate from these settings. The plugin does not change it. Workers need relevant context in the request or accessible files; a short instruction referring only to the parent's earlier discussion may be insufficient.
 
 ### Resume configuration pitfall
 
@@ -169,7 +243,12 @@ Short reports are included in additional context; long reports are passed by pri
 
 The repository includes no credentials or live datasets. Publishing this source does not publish your local config or runtime state. No claim is made that the sandbox blocks access to every readable private file: configure your workspace and task scope appropriately.
 
-## Tests
+## Tests and verification
+
+**Verified:** 12 offline tests, a live synthetic low → medium → low workflow in one persistent worker thread, plugin installation, and the actual `@route` mention picker. See [the verification record](docs/verification.md).
+
+**Limits:** fake-process tests validate coordination and local cleanup; they do not establish task accuracy or provider-side billing cancellation. Parent relay wording depends on the model, and interactive execution requires trusted hooks. The cost study is a separate static calculation, not an execution benchmark.
+
 
 ```bash
 python3 -m unittest discover -s tests -v
@@ -183,16 +262,36 @@ For a live smoke test after installation, use a synthetic task with no side effe
 @route Use only this fixture; do not access files, network, or external systems. Use routine for A: list two colors. Use analysis for B: explain why one experimental run cannot establish reproducibility. Use routine for C: summarize B in one sentence.
 ```
 
-## Uninstall
+## Update or uninstall
+
+After updating the source checkout, reinstall the cached plugin:
+
+```bash
+git pull
+codex plugin add route@hook-router
+```
+
+Restart Codex and review any changed definitions in `/hooks`. Your personal model-selection config and session state remain separate from the installed package.
+
+For a plugin installation:
+
+```bash
+codex plugin remove route@hook-router
+```
+
+For the alternative standalone hook installation:
 
 ```bash
 python3 router.py --uninstall
 ```
 
-Only this checkout/config command's two hook entries are removed. Other hooks are preserved. State, reports, and Codex worker history remain for inspection; delete them separately only when you choose. `--hooks-file PATH` supports an alternate hooks file for testing or custom setups.
+The standalone command removes only this checkout/config command's two personal hook entries, preserving unrelated hooks. It does not uninstall the plugin. `--hooks-file PATH` supports alternate personal hook files. Neither method deletes your external configuration, reports, or worker history; remove those separately only when intended.
 
 ## Documentation
 
+- [Cost comparison: measurements, static scenarios, and subscription limits](cost_comparison.md)
+- [Hook Router vs. LiteLLM: selection scope and agent sessions (Korean)](docs/261004_litellm-comparison.md)
+- [Verification: automated checks, live smoke test, and plugin installation](docs/verification.md)
 - [Codex hooks and hook trust](https://learn.chatgpt.com/docs/hooks)
 - [Architecture image generation prompt](docs/architecture-image-prompt.md)
 - [Module source](hook_router/)
