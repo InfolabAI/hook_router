@@ -1,0 +1,35 @@
+{
+  "trigger": "@route",
+  "router": {
+    "model": "gpt-6.1-sol",
+    "effort": "low"
+  },
+  "profiles": [
+    {
+      "name": "routine",
+      "model": "gpt-6.1-sol",
+      "effort": "low",
+      "description": "Summaries, extraction, routine edits, and follow-ups based on completed analysis."
+    },
+    {
+      "name": "analysis",
+      "model": "gpt-6.1-sol",
+      "effort": "medium",
+      "description": "New technical analysis, evidence review, and nontrivial debugging."
+    },
+    {
+      "name": "complex",
+      "model": "gpt-6-astra",
+      "effort": "high",
+      "description": "Difficult design, conflicting evidence, or an explicit request for the strongest model."
+    }
+  ],
+  "sandbox": "read-only",
+  "network_access": false,
+  "writable_roots": [],
+  "instructions": "Complete only the current step. Respect the user's scope. Do not send messages or change external systems without explicit authorization.",
+  "state_dir": "~/.local/share/codex-hook-router",
+  "total_timeout": 900,
+  "router_timeout": 120,
+  "worker_timeout": 780
+}
