@@ -27,3 +27,18 @@ Local tests verify the hook output contract. Actual parent wording and graphical
 ## Publication review
 
 The public checkout contains source, synthetic fixtures, example configuration, documentation, the GPT Image diagram, and its generation prompt. Runtime state, authentication, live prompts/results, personal paths, private messages, and workflow databases are excluded. Commit metadata uses a generic contributor identity.
+
+## Plugin packaging (0.2.0)
+
+- Added the `route` plugin manifest, bundled UserPromptSubmit/Interrupt hooks,
+  and a repository marketplace. The package contains no skills or MCP servers.
+- Verified installation with `codex plugin add route@hook-router` on Codex 0.160.0.
+- Opened the actual terminal mention picker: searching `@route` lists `Route`
+  as a Plugin; Tab inserts `@Route` without executing a model request.
+- Added text-prefix and serialized plugin-mention parsing, with negative cases
+  for unrelated mentions and an end-to-end fake-Codex execution test.
+- All 12 tests pass, including interruption and descendant cleanup.
+- Verified the installed package matches source and its bundled command handles
+  a plugin mention. Existing private configuration and state remain separate.
+- Plugin hook trust is deliberately left to the user in `/hooks`; installing
+  and inspecting autocomplete does not imply trust or a live routed task.

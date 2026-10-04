@@ -12,6 +12,13 @@ from hook_router.processes import interrupt
 from hook_router.storage import write
 
 
+def extract_request(prompt, trigger):
+    """Accept the text prefix or a leading Route plugin mention from the picker."""
+    plugin = r'\[[^\]\n]+\]\(plugin://route@[^\s/)]+\)'
+    match = re.fullmatch(r'\s*(?:' + re.escape(trigger) + '|@Route|' + plugin + r')(?:\s+(.*))?', prompt, re.DOTALL)
+    return (match.group(1) or '') if match else None
+
+
 def main():
     parser = argparse.ArgumentParser(description='Ordered model routing for Codex UserPromptSubmit hooks (Linux).')
     parser.add_argument('--config', type=Path, default=Path.home()/'.config/codex-hook-router/config.json')
@@ -56,10 +63,9 @@ def main():
             return 0
         if kind != 'UserPromptSubmit':
             return 0
-        match = re.fullmatch(r'\s*' + re.escape(config['trigger']) + r'(?:\s+(.*))?', event.get('prompt', ''), re.DOTALL)
-        if not match:
+        request = extract_request(event.get('prompt', ''), config['trigger'])
+        if request is None:
             return 0
-        request = match.group(1) or ''
         cwd = Path(event.get('cwd', os.getcwd())).resolve()
         if not parent or not turn:
             answer = 'Missing session_id or turn_id. No work executed; update your Codex hook runtime.'

@@ -16,6 +16,7 @@ from hook_router.engine import run, session_path, relay
 from hook_router.install import install
 from hook_router.processes import command, interrupt
 from hook_router.storage import identity, read, write
+from hook_router.cli import extract_request
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -29,6 +30,15 @@ def result(status='completed', report='fixture result'):
 
 
 class Tests(unittest.TestCase):
+    def test_plugin_mention_and_prefix(self):
+        for prefix in ('@route', '@Route', '[@Route](plugin://route@hook-router)', '[Route](plugin://route@local)'):
+            self.assertEqual(extract_request(prefix + ' A\nB', '@route'), 'A\nB')
+            self.assertEqual(extract_request(prefix + ' --resume', '@route'), '--resume')
+            self.assertEqual(extract_request(prefix, '@route'), '')
+        for prompt in ('ordinary request', '@route-other A', 'Discuss @route A',
+                       '[Route](https://example.com) A', '[Route](plugin://route-other@local) A'):
+            self.assertIsNone(extract_request(prompt, '@route'))
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -144,14 +154,20 @@ print(json.dumps({'type':'thread.started','thread_id':'fake-thread'}),flush=True
         file=binpath/'codex';file.write_text('#!'+sys.executable+'\n'+code);file.chmod(0o700)
         return dict(os.environ,PATH=str(binpath)+os.pathsep+os.environ['PATH'],FAKE_WAIT='1' if waiting else '0',PID_FILE=str(self.root/'pids'))
 
-    def start_hook(self,env):
+    def start_hook(self,env,prompt='@route fixture'):
         p=subprocess.Popen([sys.executable,str(ROOT/'router.py'),'--config',str(self.config_path)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env=env)
-        p.stdin.write(json.dumps({'hook_event_name':'UserPromptSubmit','prompt':'@route fixture','session_id':'parent','turn_id':'turn','cwd':str(self.root)}));p.stdin.close();p.stdin=None
+        p.stdin.write(json.dumps({'hook_event_name':'UserPromptSubmit','prompt':prompt,'session_id':'parent','turn_id':'turn','cwd':str(self.root)}));p.stdin.close();p.stdin=None
         self.addCleanup(lambda: p.kill() if p.poll() is None else None)
         return p
 
     def test_full_cli_with_fake_codex(self):
         p=self.start_hook(self.fake_codex())
+        out,err=p.communicate(timeout=10)
+        self.assertEqual(p.returncode,0,err)
+        self.assertIn('Fixture executed',json.loads(out)['hookSpecificOutput']['additionalContext'])
+
+    def test_plugin_mention_full_cli(self):
+        p=self.start_hook(self.fake_codex(),'[@Route](plugin://route@hook-router) fixture')
         out,err=p.communicate(timeout=10)
         self.assertEqual(p.returncode,0,err)
         self.assertIn('Fixture executed',json.loads(out)['hookSpecificOutput']['additionalContext'])

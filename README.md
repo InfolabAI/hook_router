@@ -2,7 +2,7 @@
 
 **One request. Different models. Ordered execution. One parent conversation.**
 
-Hook Router is a small, configurable **Codex CLI hook** that assigns parts of a request to different model/reasoning profiles. A routing model produces a JSON plan; Python validates and executes it sequentially; the parent assistant receives the report and delivers it to you.
+Hook Router is a small, configurable **Codex plugin with lifecycle hooks** that assigns parts of a request to different model/reasoning profiles. A routing model produces a JSON plan; Python validates and executes it sequentially; the parent assistant receives the report and delivers it to you. Its plugin name is `route`; no skill or MCP server is required.
 
 It is a standalone implementation with **no project-specific services, databases, personal paths, credentials, or workflow records**. Python standard library only. MIT licensed.
 
@@ -57,10 +57,17 @@ Edit `~/.config/codex-hook-router/config.json` to select **model IDs available t
 
 ```bash
 python3 router.py --check
-python3 router.py --install
+codex plugin marketplace add "$PWD"
+codex plugin add route@hook-router
 ```
 
-Open **`/hooks` in Codex and review/trust both `UserPromptSubmit` and `Interrupt` definitions**. This is a Codex requirement; installation does not bypass hook trust. Keep this checkout in place because the installed command refers to its entrypoint. Reinstall and review trust if you move the checkout or change the config path/timeout.
+If you previously used this checkout's `python3 router.py --install`, run `python3 router.py --uninstall` after installing the plugin to remove the duplicate personal hooks. It preserves your configuration and session history.
+
+Restart Codex, open **`/hooks` and review/trust the plugin's `UserPromptSubmit` and `Interrupt` definitions**. This is a Codex requirement; installation does not bypass hook trust. Type `@route`, select **Route** (Plugin), and append your request. The picker inserts `@Route`; serialized `plugin://route@...` mentions are also recognized. Selection alone does not run anything; submitting the request starts the hook before the parent model.
+
+The repository root is the plugin package: `.codex-plugin/plugin.json` supplies its identity and menu description, `hooks/hooks.json` registers both lifecycle events using `${PLUGIN_ROOT}`, and `.agents/plugins/marketplace.json` makes this checkout installable. Installed code is cached by Codex; reinstall after updating the source. The personal config and state remain outside the plugin. The bundled hook timeout is 960 seconds (Interrupt: 3); keep `total_timeout` below that or update the hook definition and review trust again.
+
+For a standalone installation without a plugin menu entry, use `python3 router.py --install` instead of the plugin commands. Use only one registration method at a time.
 
 Then, in any Codex workspace:
 
